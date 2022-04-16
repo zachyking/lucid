@@ -59,8 +59,8 @@ export type Provider = Blockfrost | GraphQL; // more providers can be added here
 
 export class GraphQL implements ProviderSchema {
   gqlUrl: string;
-  submitUrl: Wallet;
-  constructor(gqlUrl: string, submitUrl: Wallet) {
+  submitUrl: string;
+  constructor(gqlUrl: string, submitUrl: string) {
     this.gqlUrl = gqlUrl;
     this.submitUrl = submitUrl;
   }
