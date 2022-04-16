@@ -1,3 +1,5 @@
+import { ApolloClient, gql, InMemoryCache } from '@apollo/client/core';
+import { blake2sHex } from 'blakejs';
 import {
   TransactionBuilder,
   TransactionBuilderConfig,
@@ -53,7 +55,292 @@ if (typeof window === 'undefined') {
   global.Response = fetch.Response;
 }
 
-export type Provider = Blockfrost; // more providers can be added here
+export type Provider = Blockfrost | GraphQL; // more providers can be added here
+
+export class GraphQL implements ProviderSchema {
+  gqlUrl: string;
+  submitUrl: Wallet;
+  constructor(gqlUrl: string, submitUrl: Wallet) {
+    this.gqlUrl = gqlUrl;
+    this.submitUrl = submitUrl;
+  }
+
+  ProtocolParametersQuery = gql`
+query getProtocolParameters {
+  cardano {
+    tip {
+      slotNo
+    }
+    currentEpoch {
+      protocolParams {
+        minFeeA
+        minFeeB
+        poolDeposit
+        keyDeposit
+        coinsPerUtxoWord
+        maxValSize
+        maxTxSize
+        priceMem
+        priceStep
+      }
+    }
+  }
+}`
+
+  async getProtocolParameters(): Promise<ProtocolParameters> {
+    const apollo = new ApolloClient({
+      uri: this.gqlUrl,
+      cache: new InMemoryCache()
+    })
+    type QueryData = {
+      cardano: {
+        currentEpoch: {
+          protocolParams: {
+            minFeeA: number             
+            minFeeB: number           
+            poolDeposit: number             
+            keyDeposit: number              
+            coinsPerUtxoWord: number          
+            maxValSize: string                
+            maxTxSize: number               
+            priceMem: number                
+            priceStep: number               
+          }
+        }
+      }
+    }
+    const qdata = await apollo.query<QueryData>({ query: this.ProtocolParametersQuery })
+    const params = qdata.data.cardano.currentEpoch.protocolParams
+    return {
+      minFeeA: parseInt(params.minFeeA.toString()),
+      minFeeB: parseInt(params.minFeeB.toString()),
+      maxTxSize: parseInt(params.maxTxSize.toString()),
+      maxValSize: parseInt(params.maxValSize),
+      keyDeposit: BigInt(params.keyDeposit),
+      poolDeposit: BigInt(params.poolDeposit),
+      priceMem: parseFloat(params.priceMem.toString()),
+      priceStep: parseFloat(params.priceStep.toString()),
+      coinsPerUtxoWord: BigInt(params.coinsPerUtxoWord),
+    };
+  }
+  
+  async getCurrentSlot(): Promise<Slot> {
+    const TipQuery = gql`
+query getCurrentTip {
+    cardano {
+      tip {
+        slotNo
+      }
+    }
+  }`
+    const apollo = new ApolloClient({
+      uri: this.gqlUrl,
+      cache: new InMemoryCache()
+    })
+    type QueryData = {
+      cardano: {
+        tip: {
+          slotNo: number
+        }
+      }
+    }
+
+    const qdata = await apollo.query<QueryData>({ query: TipQuery })
+    return qdata.data.cardano.tip.slotNo
+  }
+  
+  async getUtxos(address: string): Promise<UTxO[]> {
+    const UTxOsQuery = gql`
+  query UTxOsByAddress($address: String!) {
+    utxos(where: { address: { _eq: $address } }) {
+      txHash
+      index
+      value
+      tokens {
+        asset {
+          policyId
+          assetName
+        }
+        quantity
+      }
+    }
+  }`
+    const apollo = new ApolloClient({
+      uri: this.gqlUrl,
+      cache: new InMemoryCache()
+    })
+
+    type QueryData = {
+      utxos: {
+        txHash: string
+        index: number
+        value: string
+        tokens: {
+          asset: {
+            policyId: string
+            assetName: string
+          }
+          quantity: string
+        }[]
+      }[]
+    }
+
+    type QueryVars = {
+      address: string
+    }
+
+    const qdata = await apollo.query<QueryData, QueryVars>({
+      query: UTxOsQuery,
+      variables: { address: address }
+    })
+    const utxos = qdata.data?.utxos
+
+    return utxos.map((r) => ({
+      txHash: r.txHash,
+      outputIndex: r.index,
+      assets: (() => {
+        const a: any = {};
+        r.tokens.forEach((token: {
+          asset: {
+              policyId: string;
+              assetName: string;
+          };
+          quantity: string;
+        }) => {
+          a[token.asset.policyId + token.asset.assetName] = BigInt(token.quantity);
+        });
+        a['lovelace'] = r.value
+        return a;
+      })(),
+      address,
+      datumHash: '',
+    }));
+  }
+
+  async getUtxosWithUnit(address: Address, unit: Unit): Promise<UTxO[]> {
+    const AssetUTxOQuery = gql`
+query UTxOWithAssetQuery($address: String!, $policyId: String!, $asset: String!) {
+  utxos(where: { 
+    address: { _eq: $address }, _and: {
+    tokens: { 
+      asset: {
+          policyId: {	
+              _eq: $policyId
+            }, 
+          _and:	{
+            assetName: {
+              _eq: $asset
+            }
+          }
+        }
+      }
+    }
+  }) {
+    txHash
+    index
+  }
+}`
+    const apollo = new ApolloClient({
+      uri: this.gqlUrl,
+      cache: new InMemoryCache()
+    })
+
+    type QueryData = {
+      utxos: {
+        txHash: string
+        index: number
+        value: string
+        tokens: {
+          asset: {
+            policyId: string
+            assetName: string
+          }
+          quantity: string
+        }[]
+      }[]
+    }
+    type QueryVars = {
+      address: string,
+      policyId: string,
+      asset: string
+    }
+    const asstq = await apollo.query<QueryData, QueryVars>({
+      query: AssetUTxOQuery,
+      variables: { address: address, policyId: unit.slice(0, 56), asset: unit.slice(56) }
+    })
+    const utxos = asstq.data?.utxos
+    return utxos.map((r) => ({
+      txHash: r.txHash,
+      outputIndex: r.index,
+      assets: (() => {
+        const a: any = {};
+        r.tokens.forEach((token: {
+          asset: {
+              policyId: string;
+              assetName: string;
+          };
+          quantity: string;
+        }) => {
+          a[token.asset.policyId + token.asset.assetName] = BigInt(token.quantity);
+        });
+        a['lovelace'] = r.value
+        return a;
+      })(),
+      address,
+      datumHash: '',
+    }));
+  }
+
+  async awaitTx(txHash: TxHash): Promise<boolean> {
+    const TxQuery = gql`
+    query TxQuery($txhash: Hash32Hex!) {
+      transactions(where: { hash: { _eq: $txhash } }) {
+        hash
+      }
+    }`
+    type QueryData = {
+      transactions: {
+        hash: string
+      }[]
+    }
+    type QueryVars = {
+      txhash: string
+    }
+    return new Promise((res, _) => {
+      const confirmation = setInterval(async () => {
+        const apollo = new ApolloClient({
+          uri: this.gqlUrl,
+          cache: new InMemoryCache()
+        })
+        const txQ = await apollo.query<QueryData, QueryVars>({
+          query: TxQuery,
+          variables: { txhash: txHash }
+        })
+
+        if (!txQ.error && !txQ.errors && !txQ.data.transactions && txQ.data.transactions.length > 0) {
+          clearInterval(confirmation);
+          res(true);
+          return;
+        }
+      }, 3000);
+    });
+  }
+
+  async submitTx(tx: Transaction): Promise<TxHash> {
+    
+    const result = await fetch(`${this.submitUrl}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/cbor' },
+      body: tx.to_bytes(),
+    }).then((res) => res.json());
+    if (!result || result.error) {
+      if (result?.status_code === 400) throw new Error(result.message);
+      else throw new Error('Could not submit transaction.');
+    } else {
+      return blake2sHex(tx.body().to_bytes(), null, 32)
+    }
+  }
+}
 
 export class Blockfrost implements ProviderSchema {
   url: string;
@@ -195,7 +482,7 @@ export class Lucid {
     this.provider = provider;
     this.network = network;
     const protocolParameters = await provider.getProtocolParameters();
-    this.txBuilderConfig = S.TransactionBuilderConfigBuilder.new()
+    let builderConfig = S.TransactionBuilderConfigBuilder.new()
       .coins_per_utxo_word(
         S.BigNum.from_str(protocolParameters.coinsPerUtxoWord.toString()),
       )
@@ -217,15 +504,15 @@ export class Lucid {
           protocolParameters.priceStep,
         ),
       )
-      .blockfrost(
+      if((provider as Blockfrost).projectId) builderConfig = builderConfig.blockfrost(
         S.Blockfrost.new(
-          provider.url + '/utils/txs/evaluate',
-          provider.projectId,
-        ),
+          (provider as Blockfrost).url + '/utils/txs/evaluate',
+          (provider as Blockfrost).projectId
+        )
       )
-      .costmdls(costModel.plutusV1())
-      .prefer_pure_change(true)
-      .build();
+      this.txBuilderConfig = builderConfig.costmdls(costModel.plutusV1())
+        .prefer_pure_change(true)
+        .build();
   }
 
   static async currentSlot(): Promise<Slot> {

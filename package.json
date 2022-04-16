@@ -43,6 +43,8 @@
   "author": "Alessandro Konrad",
   "license": "MIT",
   "dependencies": {
+    "@apollo/client": "^3.5.10",
+    "blakejs": "^1.2.1",
     "node-fetch": "^3.2.3"
   },
   "volta": {
