@@ -4,6 +4,7 @@ import {
   Transaction,
   TransactionWitnessSetBuilder,
 } from '../custom_modules/cardano-multiplatform-lib-browser';
+import { Buffer } from 'buffer'
 import { S } from './core';
 import { costModel } from './costmodel';
 import {
@@ -40,18 +41,6 @@ import {
   unixTimeToSlot,
   unixTimeToSlotTestnet,
 } from './utils';
-
-if (typeof window === 'undefined') {
-  const fetch = await import('node-fetch');
-  // @ts-ignore
-  global.fetch = fetch.default;
-  // @ts-ignore
-  global.Headers = fetch.Headers;
-  // @ts-ignore
-  global.Request = fetch.Request;
-  // @ts-ignore
-  global.Response = fetch.Response;
-}
 
 export type Provider = Blockfrost; // more providers can be added here
 

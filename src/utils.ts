@@ -3,6 +3,7 @@ import {
   TransactionUnspentOutput,
   Value,
 } from '../custom_modules/cardano-multiplatform-lib-browser/cardano_multiplatform_lib';
+import { Buffer } from 'buffer'
 import { S } from './core';
 import {
   AddressDetailed,

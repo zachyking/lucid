@@ -43,6 +43,7 @@
   "author": "Alessandro Konrad",
   "license": "MIT",
   "dependencies": {
+    "buffer": "^6.0.3",
     "node-fetch": "^3.2.3"
   },
   "volta": {

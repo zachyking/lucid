@@ -10,6 +10,7 @@ import {
   SpendingValidator,
   TxHash,
 } from '..';
+import { Buffer } from 'buffer'
 
 /**
  * MatchingNumbers Example
