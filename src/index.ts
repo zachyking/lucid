@@ -461,11 +461,14 @@ export class Blockfrost implements ProviderSchema {
   async submitTx(tx: Transaction): Promise<TxHash> {
     const result = await fetch(`${this.url}/tx/submit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/cbor' },
+      headers: {
+        'Content-Type': 'application/cbor',
+        project_id: this.projectId,
+      },
       body: tx.to_bytes(),
     }).then((res) => res.json());
     if (!result || result.error) {
-      if (result?.status_code === 400) throw new Error(result.message);
+      if (result?.status_code === 400) throw new Error(result.error);
       else throw new Error('Could not submit transaction.');
     }
     return result;
@@ -584,9 +587,7 @@ export class Lucid {
         return txWitnessSetBuilder.build();
       },
       submitTx: async (tx: Transaction) => {
-        return await Lucid.provider.submitTx(tx).catch((e) => {
-          throw new Error(e);
-        });
+        return await Lucid.provider.submitTx(tx);
       },
     };
   }
@@ -659,11 +660,9 @@ export class Lucid {
         );
       },
       submitTx: async (tx: Transaction) => {
-        const txHash = await api
-          .submitTx(Buffer.from(tx.to_bytes()).toString('hex'))
-          .catch((e) => {
-            throw new Error(e);
-          });
+        const txHash = await api.submitTx(
+          Buffer.from(tx.to_bytes()).toString('hex'),
+        );
         return txHash;
       },
     };
@@ -1035,10 +1034,7 @@ export class Tx {
     this.txBuilder.add_change_if_needed(
       S.Address.from_bech32(Lucid.wallet.address),
     );
-    return new TxComplete(
-      // TODO error handling from ex units calculation
-      await this.txBuilder.construct(),
-    );
+    return new TxComplete(await this.txBuilder.construct());
   }
 }
 
